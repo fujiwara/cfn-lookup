@@ -20,5 +20,12 @@ func FuncMap(sess *session.Session) (template.FuncMap, error) {
 			}
 			return value
 		},
+		"cfn_export": func(name string) string {
+			value, err := app.LookupExport(name)
+			if err != nil {
+				panic(fmt.Sprintf("failed to lookup %s in exports: %s", name, err))
+			}
+			return value
+		},
 	}, nil
 }
