@@ -1,76 +1,94 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/fujiwara/cfn-lookup/cfn"
-	"github.com/pkg/errors"
+	"github.com/google/subcommands"
 )
-
-func main() {
-	if err := _main(); err != nil {
-		fmt.Fprintln(os.Stderr, err.Error())
-		os.Exit(1)
-	}
-}
 
 var cache sync.Map
 
-func _main() error {
+func main() {
+	subcommands.Register(subcommands.HelpCommand(), "")
+	subcommands.Register(subcommands.FlagsCommand(), "")
+	subcommands.Register(subcommands.CommandsCommand(), "")
+	subcommands.Register(&outputCmd{}, "")
+	subcommands.Register(&exportCmd{}, "")
 	flag.Parse()
-	args := flag.Args()
-	if len(args) < 1 {
-		return flag.ErrHelp
-	}
 
-	subcmd := args[0]
 	app := cfn.New(session.Must(session.NewSession()), &cache)
-	switch subcmd {
-	case "output":
-		if len(args) != 3 {
-			return errors.Errorf("required outputKey and outputValue by arguments")
-		}
-		return cmdOutput(app, args[1:])
-	case "export":
-		if len(args) == 1 {
-			return cmdExportList(app)
-		}
-		return cmdExport(app, args[1:])
-	}
-	return errors.Errorf("invalid command %s", subcmd)
+	ctx := context.Background()
+	os.Exit(int(subcommands.Execute(ctx, app)))
 }
 
-func cmdOutput(app *cfn.App, args []string) error {
-	value, err := app.LookupOutput(args[0], args[1])
+type outputCmd struct{}
+
+func (*outputCmd) Name() string               { return "output" }
+func (*outputCmd) Synopsis() string           { return "Lookup an output value from the stack" }
+func (c *outputCmd) SetFlags(f *flag.FlagSet) {}
+func (c *outputCmd) Usage() string {
+	return `output StackName OutputKey:
+Lookup an OutputValue of the OutputKey in the StackName.`
+}
+
+func (c *outputCmd) Execute(_ context.Context, f *flag.FlagSet, args ...interface{}) subcommands.ExitStatus {
+	app := args[0].(*cfn.App)
+
+	ag := f.Args()
+	if len(ag) != 2 {
+		fmt.Fprintln(os.Stderr, c.Usage())
+		return subcommands.ExitFailure
+	}
+	value, err := app.LookupOutput(ag[0], ag[1])
 	if err != nil {
-		return err
+		fmt.Fprintln(os.Stderr, err.Error())
+		return subcommands.ExitFailure
 	}
 	fmt.Println(value)
-	return nil
+	return subcommands.ExitSuccess
 }
 
-func cmdExportList(app *cfn.App) error {
-	names, err := app.ExportedNames()
-	if err != nil {
-		return err
-	}
-	for _, name := range names {
-		fmt.Println(name)
-	}
-	return nil
+type exportCmd struct {
+	list bool
 }
 
-func cmdExport(app *cfn.App, args []string) error {
-	for _, name := range args {
-		value, err := app.LookupExport(name)
+func (*exportCmd) Name() string     { return "export" }
+func (*exportCmd) Synopsis() string { return "Lookup an exported value from CFn exports" }
+func (c *exportCmd) SetFlags(f *flag.FlagSet) {
+	f.BoolVar(&c.list, "list", false, "show exported names")
+}
+func (*exportCmd) Usage() string {
+	return `export [-list] Name:
+Lookup an exported value of the Name.`
+}
+
+func (c *exportCmd) Execute(_ context.Context, f *flag.FlagSet, args ...interface{}) subcommands.ExitStatus {
+	app := args[0].(*cfn.App)
+
+	if c.list {
+		names, err := app.ExportedNames()
 		if err != nil {
-			return err
+			fmt.Fprintln(os.Stderr, err.Error())
+			return subcommands.ExitFailure
 		}
-		fmt.Println(value)
+		fmt.Println(strings.Join(names, "\n"))
+	} else {
+		for _, name := range f.Args() {
+			value, err := app.LookupExport(name)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err.Error())
+				return subcommands.ExitFailure
+			}
+			fmt.Println(value)
+		}
 	}
-	return nil
+
+	return subcommands.ExitSuccess
 }
