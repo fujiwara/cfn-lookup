@@ -35,6 +35,15 @@ func (a *App) LookupOutput(stackName, outputKey string) (outputValue string, err
 	return lookupOutput(stack, outputKey)
 }
 
+// ListOutput lists output keys for the stack.
+func (a *App) ListOutput(stackName string) ([]string, error) {
+	stack, err := getStackWithCache(a.cfn, stackName, a.cache)
+	if err != nil {
+		return nil, err
+	}
+	return listOutput(stack)
+}
+
 func getStackWithCache(cfn *cloudformation.CloudFormation, stackName string, cache *sync.Map) (*stack, error) {
 	if cache == nil {
 		return getStack(cfn, stackName)
@@ -73,6 +82,13 @@ func lookupOutput(stack *stack, outputKey string) (outputValue string, err error
 		}
 	}
 	return "", errors.Errorf("outputKey %s is not found in stack %s", outputKey, *stack.StackName)
+}
+
+func listOutput(stack *stack) (keys []string, err error) {
+	for _, output := range stack.Outputs {
+		keys = append(keys, aws.StringValue(output.OutputKey))
+	}
+	return
 }
 
 // LookupExport lookups exported value.
