@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/fujiwara/cfn-lookup/cfn"
 	"github.com/google/subcommands"
 )
@@ -23,8 +23,15 @@ func main() {
 	subcommands.Register(&exportCmd{}, "")
 	flag.Parse()
 
-	app := cfn.New(session.Must(session.NewSession()), &cache)
 	ctx := context.Background()
+	cfg, err := config.LoadDefaultConfig(ctx,
+		config.WithRegion(os.Getenv("AWS_REGION")),
+	)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err.Error())
+		os.Exit(1)
+	}
+	app := cfn.New(cfg, &cache)
 	os.Exit(int(subcommands.Execute(ctx, app)))
 }
 
@@ -42,7 +49,7 @@ func (c *outputCmd) Usage() string {
 Lookup an OutputValue of the OutputKey in the StackName.`
 }
 
-func (c *outputCmd) Execute(_ context.Context, f *flag.FlagSet, args ...interface{}) subcommands.ExitStatus {
+func (c *outputCmd) Execute(ctx context.Context, f *flag.FlagSet, args ...interface{}) subcommands.ExitStatus {
 	app := args[0].(*cfn.App)
 	ag := f.Args()
 
@@ -51,7 +58,7 @@ func (c *outputCmd) Execute(_ context.Context, f *flag.FlagSet, args ...interfac
 			fmt.Fprintln(os.Stderr, c.Usage())
 			return subcommands.ExitFailure
 		}
-		keys, err := app.ListOutput(ag[0])
+		keys, err := app.ListOutput(ctx, ag[0])
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err.Error())
 			return subcommands.ExitFailure
@@ -62,7 +69,7 @@ func (c *outputCmd) Execute(_ context.Context, f *flag.FlagSet, args ...interfac
 			fmt.Fprintln(os.Stderr, c.Usage())
 			return subcommands.ExitFailure
 		}
-		value, err := app.LookupOutput(ag[0], ag[1])
+		value, err := app.LookupOutput(ctx, ag[0], ag[1])
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err.Error())
 			return subcommands.ExitFailure
@@ -87,11 +94,11 @@ func (*exportCmd) Usage() string {
 Lookup an exported value of the Name.`
 }
 
-func (c *exportCmd) Execute(_ context.Context, f *flag.FlagSet, args ...interface{}) subcommands.ExitStatus {
+func (c *exportCmd) Execute(ctx context.Context, f *flag.FlagSet, args ...interface{}) subcommands.ExitStatus {
 	app := args[0].(*cfn.App)
 
 	if c.list {
-		names, err := app.ExportedNames()
+		names, err := app.ExportedNames(ctx)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err.Error())
 			return subcommands.ExitFailure
@@ -99,7 +106,7 @@ func (c *exportCmd) Execute(_ context.Context, f *flag.FlagSet, args ...interfac
 		fmt.Println(strings.Join(names, "\n"))
 	} else {
 		for _, name := range f.Args() {
-			value, err := app.LookupExport(name)
+			value, err := app.LookupExport(ctx, name)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err.Error())
 				return subcommands.ExitFailure
