@@ -1,34 +1,35 @@
 package cfn
 
 import (
+	"context"
 	"sync"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/cloudformation"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/cloudformation"
+	types "github.com/aws/aws-sdk-go-v2/service/cloudformation/types"
 	"github.com/pkg/errors"
 )
 
 // App represents an application
 type App struct {
-	cfn   *cloudformation.CloudFormation
+	cfn   *cloudformation.Client
 	cache *sync.Map
 }
 
-type stack = cloudformation.Stack
-type export = cloudformation.Export
+type stack = types.Stack
+type export = types.Export
 
 // New creates an application instance
-func New(sess *session.Session, cache *sync.Map) *App {
+func New(cfg aws.Config, cache *sync.Map) *App {
 	return &App{
-		cfn:   cloudformation.New(sess),
+		cfn:   cloudformation.NewFromConfig(cfg),
 		cache: cache,
 	}
 }
 
 // LookupOutput lookups output value for the stack.
-func (a *App) LookupOutput(stackName, outputKey string) (outputValue string, err error) {
-	stack, err := getStackWithCache(a.cfn, stackName, a.cache)
+func (a *App) LookupOutput(ctx context.Context, stackName, outputKey string) (outputValue string, err error) {
+	stack, err := getStackWithCache(ctx, a.cfn, stackName, a.cache)
 	if err != nil {
 		return "", err
 	}
@@ -36,17 +37,17 @@ func (a *App) LookupOutput(stackName, outputKey string) (outputValue string, err
 }
 
 // ListOutput lists output keys for the stack.
-func (a *App) ListOutput(stackName string) ([]string, error) {
-	stack, err := getStackWithCache(a.cfn, stackName, a.cache)
+func (a *App) ListOutput(ctx context.Context, stackName string) ([]string, error) {
+	stack, err := getStackWithCache(ctx, a.cfn, stackName, a.cache)
 	if err != nil {
 		return nil, err
 	}
 	return listOutput(stack)
 }
 
-func getStackWithCache(cfn *cloudformation.CloudFormation, stackName string, cache *sync.Map) (*stack, error) {
+func getStackWithCache(ctx context.Context, cfn *cloudformation.Client, stackName string, cache *sync.Map) (*stack, error) {
 	if cache == nil {
-		return getStack(cfn, stackName)
+		return getStack(ctx, cfn, stackName)
 	}
 
 	key := "stack::" + stackName
@@ -54,7 +55,7 @@ func getStackWithCache(cfn *cloudformation.CloudFormation, stackName string, cac
 		return s.(*stack), nil
 	}
 
-	if s, err := getStack(cfn, stackName); err != nil {
+	if s, err := getStack(ctx, cfn, stackName); err != nil {
 		return nil, err
 	} else {
 		cache.Store(key, s)
@@ -62,8 +63,8 @@ func getStackWithCache(cfn *cloudformation.CloudFormation, stackName string, cac
 	}
 }
 
-func getStack(cfn *cloudformation.CloudFormation, stackName string) (*stack, error) {
-	out, err := cfn.DescribeStacks(&cloudformation.DescribeStacksInput{
+func getStack(ctx context.Context, cfn *cloudformation.Client, stackName string) (*stack, error) {
+	out, err := cfn.DescribeStacks(ctx, &cloudformation.DescribeStacksInput{
 		StackName: aws.String(stackName),
 	})
 	if err != nil {
@@ -72,13 +73,13 @@ func getStack(cfn *cloudformation.CloudFormation, stackName string) (*stack, err
 	if len(out.Stacks) == 0 {
 		return nil, errors.Errorf("%s is not found", stackName)
 	}
-	return out.Stacks[0], nil
+	return &out.Stacks[0], nil
 }
 
 func lookupOutput(stack *stack, outputKey string) (outputValue string, err error) {
 	for _, output := range stack.Outputs {
-		if aws.StringValue(output.OutputKey) == outputKey {
-			return aws.StringValue(output.OutputValue), nil
+		if aws.ToString(output.OutputKey) == outputKey {
+			return aws.ToString(output.OutputValue), nil
 		}
 	}
 	return "", errors.Errorf("outputKey %s is not found in stack %s", outputKey, *stack.StackName)
@@ -86,14 +87,14 @@ func lookupOutput(stack *stack, outputKey string) (outputValue string, err error
 
 func listOutput(stack *stack) (keys []string, err error) {
 	for _, output := range stack.Outputs {
-		keys = append(keys, aws.StringValue(output.OutputKey))
+		keys = append(keys, aws.ToString(output.OutputKey))
 	}
 	return
 }
 
 // LookupExport lookups exported value.
-func (a *App) LookupExport(name string) (value string, err error) {
-	ex, err := getExportsWithCache(a.cfn, a.cache)
+func (a *App) LookupExport(ctx context.Context, name string) (value string, err error) {
+	ex, err := getExportsWithCache(ctx, a.cfn, a.cache)
 	if err != nil {
 		return "", err
 	}
@@ -101,17 +102,17 @@ func (a *App) LookupExport(name string) (value string, err error) {
 }
 
 // ExportedNames lists names of exports.
-func (a *App) ExportedNames() ([]string, error) {
-	ex, err := getExportsWithCache(a.cfn, a.cache)
+func (a *App) ExportedNames(ctx context.Context) ([]string, error) {
+	ex, err := getExportsWithCache(ctx, a.cfn, a.cache)
 	if err != nil {
 		return nil, err
 	}
 	return listNames(ex)
 }
 
-func getExportsWithCache(cfn *cloudformation.CloudFormation, cache *sync.Map) ([]*export, error) {
+func getExportsWithCache(ctx context.Context, cfn *cloudformation.Client, cache *sync.Map) ([]*export, error) {
 	if cache == nil {
-		return getExports(cfn)
+		return getExports(ctx, cfn)
 	}
 
 	key := "export::"
@@ -119,7 +120,7 @@ func getExportsWithCache(cfn *cloudformation.CloudFormation, cache *sync.Map) ([
 		return e.([]*export), nil
 	}
 
-	if ex, err := getExports(cfn); err != nil {
+	if ex, err := getExports(ctx, cfn); err != nil {
 		return nil, err
 	} else {
 		cache.Store(key, ex)
@@ -127,11 +128,11 @@ func getExportsWithCache(cfn *cloudformation.CloudFormation, cache *sync.Map) ([
 	}
 }
 
-func getExports(cfn *cloudformation.CloudFormation) ([]*export, error) {
+func getExports(ctx context.Context, cfn *cloudformation.Client) ([]*export, error) {
 	var nextToken *string
 	exs := make([]*export, 0)
 	for {
-		out, err := cfn.ListExports(&cloudformation.ListExportsInput{
+		out, err := cfn.ListExports(ctx, &cloudformation.ListExportsInput{
 			NextToken: nextToken,
 		})
 		if err != nil {
@@ -139,7 +140,7 @@ func getExports(cfn *cloudformation.CloudFormation) ([]*export, error) {
 		}
 		for _, ex := range out.Exports {
 			ex := ex
-			exs = append(exs, ex)
+			exs = append(exs, &ex)
 		}
 		if nextToken = out.NextToken; nextToken == nil {
 			break
@@ -150,8 +151,8 @@ func getExports(cfn *cloudformation.CloudFormation) ([]*export, error) {
 
 func lookupExport(exs []*export, name string) (string, error) {
 	for _, ex := range exs {
-		if aws.StringValue(ex.Name) == name {
-			return aws.StringValue(ex.Value), nil
+		if aws.ToString(ex.Name) == name {
+			return aws.ToString(ex.Value), nil
 		}
 	}
 	return "", errors.Errorf("%s is not found in exports", name)
@@ -160,7 +161,7 @@ func lookupExport(exs []*export, name string) (string, error) {
 func listNames(exs []*export) ([]string, error) {
 	names := make([]string, 0, len(exs))
 	for _, ex := range exs {
-		names = append(names, aws.StringValue(ex.Name))
+		names = append(names, aws.ToString(ex.Name))
 	}
 	return names, nil
 }
