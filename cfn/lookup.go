@@ -12,8 +12,13 @@ import (
 
 // App represents an application
 type App struct {
-	cfn   *cloudformation.Client
+	cfn   cfnClient
 	cache *sync.Map
+}
+
+type cfnClient interface {
+	DescribeStacks(ctx context.Context, params *cloudformation.DescribeStacksInput, optFns ...func(*cloudformation.Options)) (*cloudformation.DescribeStacksOutput, error)
+	ListExports(ctx context.Context, params *cloudformation.ListExportsInput, optFns ...func(*cloudformation.Options)) (*cloudformation.ListExportsOutput, error)
 }
 
 type stack = types.Stack
@@ -45,7 +50,7 @@ func (a *App) ListOutput(ctx context.Context, stackName string) ([]string, error
 	return listOutput(stack)
 }
 
-func getStackWithCache(ctx context.Context, cfn *cloudformation.Client, stackName string, cache *sync.Map) (*stack, error) {
+func getStackWithCache(ctx context.Context, cfn cfnClient, stackName string, cache *sync.Map) (*stack, error) {
 	if cache == nil {
 		return getStack(ctx, cfn, stackName)
 	}
@@ -63,7 +68,7 @@ func getStackWithCache(ctx context.Context, cfn *cloudformation.Client, stackNam
 	}
 }
 
-func getStack(ctx context.Context, cfn *cloudformation.Client, stackName string) (*stack, error) {
+func getStack(ctx context.Context, cfn cfnClient, stackName string) (*stack, error) {
 	out, err := cfn.DescribeStacks(ctx, &cloudformation.DescribeStacksInput{
 		StackName: aws.String(stackName),
 	})
@@ -110,7 +115,7 @@ func (a *App) ExportedNames(ctx context.Context) ([]string, error) {
 	return listNames(ex)
 }
 
-func getExportsWithCache(ctx context.Context, cfn *cloudformation.Client, cache *sync.Map) ([]*export, error) {
+func getExportsWithCache(ctx context.Context, cfn cfnClient, cache *sync.Map) ([]*export, error) {
 	if cache == nil {
 		return getExports(ctx, cfn)
 	}
@@ -128,7 +133,7 @@ func getExportsWithCache(ctx context.Context, cfn *cloudformation.Client, cache 
 	}
 }
 
-func getExports(ctx context.Context, cfn *cloudformation.Client) ([]*export, error) {
+func getExports(ctx context.Context, cfn cfnClient) ([]*export, error) {
 	var nextToken *string
 	exs := make([]*export, 0)
 	for {
