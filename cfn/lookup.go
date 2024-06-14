@@ -2,12 +2,12 @@ package cfn
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/cloudformation"
 	types "github.com/aws/aws-sdk-go-v2/service/cloudformation/types"
-	"github.com/pkg/errors"
 )
 
 // App represents an application
@@ -73,10 +73,10 @@ func getStack(ctx context.Context, cfn cfnClient, stackName string) (*stack, err
 		StackName: aws.String(stackName),
 	})
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to describe stacks %s", stackName)
+		return nil, fmt.Errorf("failed to describe stacks %s: %w", stackName, err)
 	}
 	if len(out.Stacks) == 0 {
-		return nil, errors.Errorf("%s is not found", stackName)
+		return nil, fmt.Errorf("%s is not found: %w", stackName, err)
 	}
 	return &out.Stacks[0], nil
 }
@@ -87,7 +87,7 @@ func lookupOutput(stack *stack, outputKey string) (outputValue string, err error
 			return aws.ToString(output.OutputValue), nil
 		}
 	}
-	return "", errors.Errorf("outputKey %s is not found in stack %s", outputKey, *stack.StackName)
+	return "", fmt.Errorf("outputKey %s is not found in stack %s", outputKey, *stack.StackName)
 }
 
 func listOutput(stack *stack) (keys []string, err error) {
@@ -141,7 +141,7 @@ func getExports(ctx context.Context, cfn cfnClient) ([]*export, error) {
 			NextToken: nextToken,
 		})
 		if err != nil {
-			return nil, errors.Wrapf(err, "failed to list exports")
+			return nil, fmt.Errorf("failed to list exports: %w", err)
 		}
 		for _, ex := range out.Exports {
 			ex := ex
@@ -160,7 +160,7 @@ func lookupExport(exs []*export, name string) (string, error) {
 			return aws.ToString(ex.Value), nil
 		}
 	}
-	return "", errors.Errorf("%s is not found in exports", name)
+	return "", fmt.Errorf("%s is not found in exports", name)
 }
 
 func listNames(exs []*export) ([]string, error) {
